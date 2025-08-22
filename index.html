@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>가계부 대시보드</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc; /* cool-gray-50 */
+        }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: all 0.3s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        .modal-backdrop {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background-color: rgba(0, 0, 0, 0.5); display: flex; justify-content: center;
+            align-items: center; z-index: 50; opacity: 0; visibility: hidden;
+            transition: opacity 0.3s ease, visibility 0.3s ease;
+        }
+        .modal-backdrop.active { opacity: 1; visibility: visible; }
+        .modal-content {
+            transform: scale(0.95); transition: transform 0.3s ease;
+        }
+        .modal-backdrop.active .modal-content { transform: scale(1); }
+        
+        .custom-alert-backdrop {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background-color: rgba(0,0,0,0.5); display: flex; justify-content: center;
+            align-items: center; z-index: 100; opacity: 0; visibility: hidden; transition: opacity 0.3s;
+        }
+        .custom-alert-backdrop.active { opacity: 1; visibility: visible; }
+        .custom-alert-box {
+            background: white; padding: 2rem; border-radius: 0.75rem; text-align: center;
+            box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04);
+            transform: scale(0.95); transition: transform 0.3s;
+        }
+        .custom-alert-backdrop.active .custom-alert-box { transform: scale(1); }
+        .custom-alert-box p { margin-bottom: 1.5rem; font-size: 1.125rem; color: #374151; }
+        .custom-alert-box button {
+            background-color: #4f46e5; color: white; font-weight: bold;
+            padding: 0.75rem 1.5rem; border-radius: 0.5rem; border: none; cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .custom-alert-box button:hover { background-color: #4338ca; }
+
+        .sub-categories {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out;
+        }
+        .arrow-icon {
+            transition: transform 0.3s ease-out;
+        }
+        #categoryFilters, #trendCategorySelector {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        input[type="checkbox"]:indeterminate {
+            background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='white' viewBox='0 0 16 16'%3e%3cpath d='M2 8a1 1 0 0 1 1-1h10a1 1 0 1 1 0 2H3a1 1 0 0 1-1-1z'/%3e%3c/svg%3e");
+            background-color: #4f46e5;
+            border-color: #4f46e5;
+        }
+    </style>
+</head>
+<body class="p-4 sm:p-6 lg:p-8">
+    <div class="max-w-7xl mx-auto">
+        <!-- 헤더 -->
+        <header class="mb-8">
+            <h1 class="text-4xl font-bold text-gray-800">가계부 대시보드 📊</h1>
+            <p class="text-gray-500 mt-2">엑셀 데이터를 붙여넣어 지출 내역을 분석하고 시각화하세요.</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <!-- 입력 섹션 -->
+            <div class="lg:col-span-1 card p-6">
+                <h2 class="text-xl font-semibold text-gray-700 mb-4">1. 데이터 붙여넣기</h2>
+                <textarea id="dataInput" class="w-full h-60 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition" placeholder="여기에 엑셀 데이터를 붙여넣으세요... (Ctrl+V)"></textarea>
+                <button id="processBtn" class="mt-4 w-full bg-indigo-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-indigo-700 transition duration-300">
+                    분석하기
+                </button>
+                <div id="categoryFiltersContainer" class="mt-6 hidden">
+                    <h3 class="text-lg font-semibold text-gray-700 mb-2">카테고리 필터</h3>
+                    <div id="categoryFilters" class="space-y-2 p-3 border rounded-lg bg-gray-50"></div>
+                </div>
+            </div>
+
+            <!-- 분석 결과 섹션 -->
+            <div id="analysisSection" class="lg:col-span-2 hidden">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                    <div class="card p-6">
+                        <div class="flex justify-between items-center mb-4">
+                            <h2 class="text-xl font-semibold text-gray-700">월별 지출 요약</h2>
+                            <select id="monthSelector" class="hidden p-2 border rounded-lg text-sm focus:ring-indigo-500 focus:border-indigo-500"></select>
+                        </div>
+                        <div id="summary" class="space-y-4"></div>
+                    </div>
+                    <div class="card p-6 flex flex-col items-center justify-center">
+                        <h2 id="expenseChartTitle" class="text-xl font-semibold text-gray-700 mb-4">월 지출 분포</h2>
+                        <div class="w-full max-w-xs">
+                            <canvas id="expenseChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+             <!-- 초기 안내 메시지 -->
+            <div id="initialMessage" class="lg:col-span-2 flex items-center justify-center card p-10">
+                <div class="text-center">
+                    <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V7a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                    <h3 class="mt-2 text-lg font-medium text-gray-900">데이터를 기다리는 중...</h3>
+                    <p class="mt-1 text-sm text-gray-500">왼쪽 입력란에 데이터를 붙여넣고 '분석하기' 버튼을 누르세요.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 월별 추이 분석 섹션 -->
+        <div id="trendAnalysisSection" class="mt-8 hidden">
+            <div class="card p-6">
+                <h2 class="text-2xl font-bold text-gray-800 mb-4">월별 지출 추이 분석</h2>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+                    <div class="md:col-span-1">
+                        <h3 class="text-lg font-semibold text-gray-700 mb-2">카테고리 선택</h3>
+                        <div id="trendCategorySelector" class="space-y-2 p-3 border rounded-lg bg-gray-50"></div>
+                    </div>
+                    <div class="md:col-span-3">
+                        <canvas id="monthlyTrendChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 모달 및 알림창 -->
+    <div id="detailsModal" class="modal-backdrop">
+        <div class="modal-content card w-11/12 max-w-6xl max-h-[90vh] flex flex-col">
+            <div class="p-6 border-b flex justify-between items-center">
+                <h2 id="modalTitle" class="text-2xl font-bold text-gray-800"></h2>
+                <button id="closeModalBtn" class="text-gray-500 hover:text-gray-800 text-3xl leading-none">&times;</button>
+            </div>
+            <div id="modalBody" class="p-6 overflow-y-auto"></div>
+        </div>
+    </div>
+    <div id="customAlert" class="custom-alert-backdrop">
+        <div class="custom-alert-box">
+            <p id="alertMessage"></p>
+            <button id="alertOkBtn">확인</button>
+        </div>
+    </div>
+
+    <script>
+        // 전역 변수
+        let allTransactions = [];
+        let expenseChartInstance = null;
+        let trendChartInstance = null;
+        let currentMonthlyData = {};
+
+        // DOM 요소
+        const processBtn = document.getElementById('processBtn');
+        const dataInput = document.getElementById('dataInput');
+        const summaryDiv = document.getElementById('summary');
+        const modal = document.getElementById('detailsModal');
+        const closeModalBtn = document.getElementById('closeModalBtn');
+        const modalTitle = document.getElementById('modalTitle');
+        const modalBody = document.getElementById('modalBody');
+        const initialMessage = document.getElementById('initialMessage');
+        const analysisSection = document.getElementById('analysisSection');
+        const customAlert = document.getElementById('customAlert');
+        const alertMessage = document.getElementById('alertMessage');
+        const alertOkBtn = document.getElementById('alertOkBtn');
+        const categoryFiltersContainer = document.getElementById('categoryFiltersContainer');
+        const categoryFilters = document.getElementById('categoryFilters');
+        const trendAnalysisSection = document.getElementById('trendAnalysisSection');
+        const trendCategorySelector = document.getElementById('trendCategorySelector');
+        const monthSelector = document.getElementById('monthSelector');
+        const expenseChartTitle = document.getElementById('expenseChartTitle');
+
+        // 이벤트 리스너
+        processBtn.addEventListener('click', processData);
+        closeModalBtn.addEventListener('click', () => modal.classList.remove('active'));
+        modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('active'); });
+        alertOkBtn.addEventListener('click', () => customAlert.classList.remove('active'));
+        monthSelector.addEventListener('change', handleMonthSelection);
+
+        function showAlert(message) {
+            alertMessage.textContent = message;
+            customAlert.classList.add('active');
+        }
+        
+        function handleMonthSelection() {
+            const selectedMonth = monthSelector.value;
+            renderSummary(currentMonthlyData, selectedMonth);
+            renderDoughnutChart(currentMonthlyData, selectedMonth);
+        }
+
+        function processData() {
+            const data = dataInput.value.trim();
+            if (!data) { showAlert('데이터를 입력해주세요.'); return; }
+
+            const rows = data.split('\n');
+            allTransactions = rows.map(row => {
+                const columns = row.split('\t');
+                if (columns.length < 8) return null;
+                const cashValue = columns[3].replace(/,/g, '');
+                const cardValue = columns[4].replace(/,/g, '');
+                return {
+                    date: columns[0], payee: columns[1], description: columns[2],
+                    cash: parseFloat(cashValue) || 0, card: parseFloat(cardValue) || 0,
+                    account: columns[5], cardType: columns[6], category: columns[7]
+                };
+            }).filter(Boolean);
+
+            if (allTransactions.length === 0) { showAlert('유효한 데이터가 없습니다. 엑셀 데이터 형식을 확인해주세요.'); return; }
+            
+            renderCategoryFilters();
+            
+            const months = [...new Set(allTransactions.map(t => t.date.substring(0, 7)))].sort().reverse();
+            if (months.length > 1) {
+                monthSelector.innerHTML = months.map(m => `<option value="${m}">${m}</option>`).join('');
+                monthSelector.classList.remove('hidden');
+                renderTrendCategorySelector();
+                trendAnalysisSection.classList.remove('hidden');
+            } else {
+                monthSelector.classList.add('hidden');
+                trendAnalysisSection.classList.add('hidden');
+            }
+
+            analyzeAndRender();
+            
+            initialMessage.classList.add('hidden');
+            analysisSection.classList.remove('hidden');
+        }
+
+        function createFilterCheckboxes(container, changeHandler, defaultChecked = true) {
+            const categoryTree = allTransactions.reduce((acc, t) => {
+                const [parent, sub = parent] = t.category.split('>');
+                if (!acc[parent]) acc[parent] = new Set();
+                acc[parent].add(t.category);
+                return acc;
+            }, {});
+
+            container.innerHTML = '';
+            
+            Object.keys(categoryTree).sort().forEach(parentCat => {
+                const parentDiv = document.createElement('div');
+                const subCategories = Array.from(categoryTree[parentCat]).sort();
+                const checkedAttr = defaultChecked ? 'checked' : '';
+
+                let subFiltersHTML = '';
+                if (subCategories.length > 1 || subCategories[0] !== parentCat) {
+                    subFiltersHTML = `<div class="pl-6 mt-1 space-y-1">` + subCategories.map(subCat => {
+                        const filterId = `${container.id}-${subCat.replace(/\s|>/g, '-')}`;
+                        return `<div class="flex items-center">
+                                    <input id="${filterId}" type="checkbox" value="${subCat}" ${checkedAttr} class="sub-filter h-4 w-4" data-parent="${parentCat}">
+                                    <label for="${filterId}" class="ml-2 block text-sm">${subCat.split('>')[1] || subCat}</label>
+                                </div>`;
+                    }).join('') + `</div>`;
+                }
+
+                parentDiv.innerHTML = `
+                    <div class="flex items-center">
+                        <input id="${container.id}-parent-${parentCat}" type="checkbox" ${checkedAttr} class="parent-filter h-4 w-4" data-parent-name="${parentCat}">
+                        <label for="${container.id}-parent-${parentCat}" class="ml-2 block text-sm font-semibold">${parentCat}</label>
+                    </div>
+                    ${subFiltersHTML}
+                `;
+                container.appendChild(parentDiv);
+            });
+            
+            container.removeEventListener('change', changeHandler);
+            container.addEventListener('change', changeHandler);
+        }
+
+        function renderCategoryFilters() {
+            createFilterCheckboxes(categoryFilters, handleFilterChange, true);
+            categoryFiltersContainer.classList.remove('hidden');
+        }
+
+        function renderTrendCategorySelector() {
+            createFilterCheckboxes(trendCategorySelector, handleTrendFilterChange, false);
+            renderTrendChart();
+        }
+
+        function handleFilterChange(e) {
+            updateParentCheckboxState(e.target, categoryFilters);
+            analyzeAndRender();
+        }
+        
+        function handleTrendFilterChange(e) {
+            updateParentCheckboxState(e.target, trendCategorySelector);
+            renderTrendChart();
+        }
+
+        function updateParentCheckboxState(target, container) {
+            if (target.type !== 'checkbox') return;
+
+            if (target.classList.contains('parent-filter')) {
+                const parentName = target.dataset.parentName;
+                const isChecked = target.checked;
+                container.querySelectorAll(`.sub-filter[data-parent="${parentName}"]`).forEach(sub => {
+                    sub.checked = isChecked;
+                });
+            } else if (target.classList.contains('sub-filter')) {
+                const parentName = target.dataset.parent;
+                const parentCheckbox = container.querySelector(`.parent-filter[data-parent-name="${parentName}"]`);
+                if (!parentCheckbox) return;
+                const siblings = container.querySelectorAll(`.sub-filter[data-parent="${parentName}"]`);
+                const checkedSiblings = container.querySelectorAll(`.sub-filter[data-parent="${parentName}"]:checked`);
+
+                if (checkedSiblings.length === siblings.length) {
+                    parentCheckbox.checked = true;
+                    parentCheckbox.indeterminate = false;
+                } else if (checkedSiblings.length === 0) {
+                    parentCheckbox.checked = false;
+                    parentCheckbox.indeterminate = false;
+                } else {
+                    parentCheckbox.checked = false;
+                    parentCheckbox.indeterminate = true;
+                }
+            }
+        }
+
+        function analyzeAndRender() {
+            const excludedCategories = new Set();
+            categoryFilters.querySelectorAll('input[type="checkbox"]:not(:checked)').forEach(checkbox => {
+                 if(checkbox.classList.contains('sub-filter')) {
+                     excludedCategories.add(checkbox.value);
+                 } else if (checkbox.classList.contains('parent-filter') && !checkbox.indeterminate) {
+                     const parentName = checkbox.dataset.parentName;
+                      categoryFilters.querySelectorAll(`.sub-filter[data-parent="${parentName}"]`).forEach(sub => excludedCategories.add(sub.value));
+                      if (!categoryFilters.querySelector(`.sub-filter[data-parent="${parentName}"]`)) {
+                          excludedCategories.add(parentName);
+                      }
+                 }
+            });
+            
+            const filteredTransactions = allTransactions.filter(t => !excludedCategories.has(t.category));
+            
+            currentMonthlyData = filteredTransactions.reduce((acc, transaction) => {
+                const month = transaction.date.substring(0, 7);
+                const amount = transaction.card + transaction.cash;
+                if (amount === 0) return acc;
+
+                const [parentCat, subCat = parentCat] = transaction.category.split('>');
+                
+                if (!acc[month]) acc[month] = {};
+                if (!acc[month][parentCat]) acc[month][parentCat] = { __total: 0 };
+                if (!acc[month][parentCat][subCat]) acc[month][parentCat][subCat] = 0;
+
+                acc[month][parentCat][subCat] += amount;
+                acc[month][parentCat].__total += amount;
+
+                return acc;
+            }, {});
+
+            const selectedMonth = monthSelector.value || Object.keys(currentMonthlyData).sort().reverse()[0];
+            renderSummary(currentMonthlyData, selectedMonth);
+            renderDoughnutChart(currentMonthlyData, selectedMonth);
+            if (Object.keys(currentMonthlyData).length > 1) {
+                renderTrendChart();
+            }
+        }
+
+        function renderSummary(monthlyData, selectedMonth) {
+            summaryDiv.innerHTML = '';
+            if (!monthlyData || !monthlyData[selectedMonth]) return;
+
+            const monthData = monthlyData[selectedMonth];
+            const monthContainer = document.createElement('div');
+            const monthTotal = Object.values(monthData).reduce((sum, cat) => sum + cat.__total, 0);
+
+            monthContainer.innerHTML = `<div class="pb-2 border-b"><div class="flex justify-between items-center mb-2">
+                        <h3 class="text-xl font-semibold text-gray-800">${selectedMonth}</h3>
+                        <p class="font-bold text-2xl ${monthTotal >= 0 ? 'text-gray-800' : 'text-blue-600'}">${monthTotal.toLocaleString()} 원</p>
+                    </div></div>`;
+            
+            const categoriesContainer = document.createElement('div');
+            categoriesContainer.className = 'space-y-1 mt-2';
+            const sortedParentCats = Object.entries(monthData).sort(([, a], [, b]) => b.__total - a.__total);
+
+            sortedParentCats.forEach(([parentCat, subCats]) => {
+                const parentCatContainer = document.createElement('div');
+                const total = subCats.__total;
+                const subCategoriesHTML = Object.entries(subCats).filter(([key]) => key !== '__total').sort(([, a], [, b]) => b - a)
+                    .map(([subCat, amount]) => `<div class="flex justify-between items-center p-2 pl-8 bg-white rounded cursor-pointer hover:bg-gray-200" data-month="${selectedMonth}" data-category="${parentCat}>${subCat}">
+                            <span>${subCat}</span>
+                            <span class="font-medium ${amount >= 0 ? 'text-gray-800' : 'text-blue-600'}">${amount.toLocaleString()} 원</span>
+                        </div>`).join('');
+
+                parentCatContainer.innerHTML = `<div class="parent-category flex justify-between items-center p-3 bg-gray-100 rounded-lg cursor-pointer hover:bg-indigo-100">
+                        <div class="flex items-center">
+                            <svg class="arrow-icon w-4 h-4 mr-2 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                            <span class="font-semibold text-gray-700">${parentCat}</span>
+                        </div>
+                        <span class="font-bold ${total >= 0 ? 'text-gray-900' : 'text-blue-600'}">${total.toLocaleString()} 원</span>
+                    </div>
+                    <div class="sub-categories pl-4 pt-1 space-y-1">${subCategoriesHTML}</div>`;
+                categoriesContainer.appendChild(parentCatContainer);
+            });
+
+            monthContainer.appendChild(categoriesContainer);
+            summaryDiv.appendChild(monthContainer);
+            
+            summaryDiv.querySelectorAll('.parent-category').forEach(el => {
+                el.addEventListener('click', () => {
+                    const subCategories = el.nextElementSibling;
+                    const arrow = el.querySelector('.arrow-icon');
+                    if (subCategories.style.maxHeight) {
+                        subCategories.style.maxHeight = null;
+                        arrow.style.transform = 'rotate(0deg)';
+                    } else {
+                        subCategories.style.maxHeight = subCategories.scrollHeight + "px";
+                        arrow.style.transform = 'rotate(90deg)';
+                    }
+                });
+            });
+            summaryDiv.querySelectorAll('.sub-categories > div').forEach(el => {
+                el.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const { month, category } = el.dataset;
+                    showDetails(month, category);
+                });
+            });
+        }
+
+        function renderDoughnutChart(monthlyData, selectedMonth) {
+            const ctx = document.getElementById('expenseChart').getContext('2d');
+            if (expenseChartInstance) expenseChartInstance.destroy();
+            
+            if (!selectedMonth || !monthlyData[selectedMonth]) {
+                 ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height); 
+                 expenseChartTitle.textContent = `월 지출 분포`;
+                 return;
+            };
+            
+            expenseChartTitle.textContent = `${selectedMonth} 지출 분포`;
+            const chartData = monthlyData[selectedMonth];
+            const labels = Object.keys(chartData).filter(label => chartData[label].__total > 0);
+            const data = labels.map(label => chartData[label].__total);
+
+            expenseChartInstance = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: '지출 내역', data: data,
+                        backgroundColor: ['#4f46e5', '#7c3aed', '#db2777', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981'],
+                        hoverOffset: 4
+                    }]
+                },
+                options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { padding: 15, font: { size: 12 } } }, tooltip: { callbacks: { label: (c) => `${c.label}: ${c.parsed.toLocaleString()} 원` } } } }
+            });
+        }
+
+        function renderTrendChart() {
+            const datasets = [];
+            const colors = ['#4f46e5', '#db2777', '#f97316', '#22c55e', '#06b6d4', '#8b5cf6', '#f59e0b', '#ec4899', '#7c3aed', '#3b82f6'];
+            let colorIndex = 0;
+
+            const months = Object.keys(currentMonthlyData).sort();
+            const parentCheckboxes = trendCategorySelector.querySelectorAll('.parent-filter');
+
+            parentCheckboxes.forEach(parentCheckbox => {
+                const parentName = parentCheckbox.dataset.parentName;
+                const subCheckboxes = trendCategorySelector.querySelectorAll(`.sub-filter[data-parent="${parentName}"]`);
+
+                if (parentCheckbox.checked && !parentCheckbox.indeterminate) {
+                    const data = months.map(month => currentMonthlyData[month]?.[parentName]?.__total || 0);
+                    datasets.push({
+                        label: parentName,
+                        data: data,
+                        backgroundColor: colors[colorIndex % colors.length],
+                    });
+                    colorIndex++;
+                } 
+                else {
+                    subCheckboxes.forEach(subCheckbox => {
+                        if (subCheckbox.checked) {
+                            const category = subCheckbox.value;
+                            const [parent, sub] = category.split('>');
+                            const data = months.map(month => currentMonthlyData[month]?.[parent]?.[sub] || 0);
+                            datasets.push({
+                                label: category.replace('>', ' > '),
+                                data: data,
+                                backgroundColor: colors[colorIndex % colors.length],
+                            });
+                            colorIndex++;
+                        }
+                    });
+                }
+            });
+
+            const ctx = document.getElementById('monthlyTrendChart').getContext('2d');
+            if (trendChartInstance) trendChartInstance.destroy();
+            trendChartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: { labels: months, datasets: datasets },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: { 
+                        x: { stacked: false },
+                        y: { stacked: false, beginAtZero: true, ticks: { callback: (value) => `${value.toLocaleString()} 원` } } 
+                    },
+                    plugins: { legend: { position: 'top' }, tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${c.parsed.y.toLocaleString()} 원` } } }
+                }
+            });
+        }
+
+        function showDetails(month, category) {
+            modalTitle.textContent = `'${month}' - '${category.replace('>', ' > ')}' 세부 내역`;
+            
+            const filteredTransactions = allTransactions.filter(t => t.date.startsWith(month) && t.category === category && (t.card !== 0 || t.cash !== 0));
+
+            let tableHTML = `<div class="overflow-x-auto"><table class="min-w-full divide-y divide-gray-200"><thead class="bg-gray-50"><tr>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">날짜</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">사용처</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">사용내역</th>
+                                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">현금</th>
+                                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">카드</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">출금통장</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">카드분류</th>
+                                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">합계</th>
+                            </tr></thead><tbody class="bg-white divide-y divide-gray-200">`;
+
+            filteredTransactions.forEach(t => {
+                const totalAmount = t.card + t.cash;
+                const amountColor = totalAmount >= 0 ? 'text-red-600' : 'text-blue-600';
+                tableHTML += `<tr>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-500">${t.date}</td>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-900">${t.payee}</td>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-500">${t.description}</td>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-700 text-right">${t.cash.toLocaleString()}</td>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-700 text-right">${t.card.toLocaleString()}</td>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-500">${t.account}</td>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-500">${t.cardType}</td>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm ${amountColor} font-semibold text-right">${totalAmount.toLocaleString()} 원</td>
+                    </tr>`;
+            });
+
+            tableHTML += `</tbody></table></div>`;
+            modalBody.innerHTML = tableHTML;
+            modal.classList.add('active');
+        }
+    </script>
+</body>
+</html>
